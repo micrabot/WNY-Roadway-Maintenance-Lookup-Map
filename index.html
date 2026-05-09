@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WNY Road Maintenance Lookup - Public Beta</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
+  <style>
+    * { box-sizing: border-box; }
+    html, body { margin:0; padding:0; height:100%; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif; }
+    #map { position:fixed; top:0; left:0; right:0; bottom:82px; background:#eef2f4; z-index:1; }
+    .leaflet-container { width:100%; height:100%; }
+    .header { position:absolute; top:14px; left:50%; transform:translateX(-50%); z-index:1000; background:white; padding:14px 22px; border-radius:10px; box-shadow:0 2px 14px rgba(0,0,0,.25); text-align:center; max-width:92vw; }
+    .header h1 { font-size:20px; margin:0 0 5px; color:#25313d; line-height:1.2; }
+    .header p { margin:0; font-size:13px; color:#667; line-height:1.35; }
+    .beta-badge { display:inline-block; background:#ff9800; color:white; font-size:11px; font-weight:800; padding:4px 10px; border-radius:14px; margin-left:8px; vertical-align:middle; letter-spacing:.5px; box-shadow:0 1px 4px rgba(0,0,0,.25); }
+    .beta-subtitle { font-size:11px; color:#777; }
+    .status { position:absolute; left:14px; bottom:96px; z-index:1000; background:white; color:#31404d; padding:10px 12px; max-width:370px; border-radius:8px; font-size:12px; box-shadow:0 2px 12px rgba(0,0,0,.22); line-height:1.35; }
+    .status strong { display:block; margin-bottom:3px; }
+    .legend { background:white; padding:13px; border-radius:8px; box-shadow:0 2px 12px rgba(0,0,0,.25); font-size:13px; min-width:180px; }
+    .legend h4 { margin:0 0 9px; font-size:14px; color:#25313d; }
+    .legend-item { display:flex; align-items:center; gap:9px; margin:7px 0; }
+    .line { width:26px; height:4px; border-radius:99px; }
+    .beta-footer { position:fixed; left:0; right:0; bottom:50px; z-index:1001; background:rgba(255,152,0,.96); color:white; text-align:center; padding:7px 12px; font-size:12px; font-weight:600; box-shadow:0 -1px 6px rgba(0,0,0,.2); }
+    footer { position:fixed; left:0; right:0; bottom:0; height:50px; background:#2c3e50; color:white; z-index:1001; display:flex; align-items:center; justify-content:center; gap:10px; font-size:13px; }
+    footer a { color:#8fd0ff; text-decoration:none; }
+    footer a:hover { text-decoration:underline; }
+    .popup-title { font-size:16px; font-weight:700; color:#1f2933; margin-bottom:8px; }
+    .popup-row { margin:6px 0; }
+    .popup-label { font-weight:700; color:#4a5568; }
+    .source-note { margin-top:8px; padding-top:8px; border-top:1px solid #ddd; color:#667; font-size:12px; }
+    @media (max-width:768px) { #map { inset:0 0 105px 0; } .header { top:10px; padding:11px 13px; } .header h1 { font-size:16px; } .header p { font-size:11px; } .status { bottom:119px; left:8px; right:8px; max-width:none; } .beta-footer { bottom:60px; font-size:11px; } footer { height:60px; flex-wrap:wrap; padding:8px; gap:7px; font-size:11px; } }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <div class="header">
+    <h1>WNY Road Maintenance Lookup <span class="beta-badge">BETA</span></h1>
+    <p>North Tonawanda, Wheatfield, Niagara Falls, Tonawanda, Amherst & Grand Island<br><span class="beta-subtitle">Based on public NYSDOT roadway data where available.</span></p>
+  </div>
+  <div id="status" class="status"><strong>Loading official roadway data...</strong>Using NYSDOT Maintenance Jurisdiction layer. The base map may appear before road lines load.</div>
+  <div class="beta-footer">Public beta. Informational only. Verify road responsibility directly with the listed agency before relying on it.</div>
+  <footer>
+    <a href="about.html">About</a><span>|</span><a href="contact.html">Contact</a><span>|</span><a href="privacy.html">Privacy</a><span>|</span><a href="terms.html">Terms</a><span>|</span><span>© 2026 WNY Road Maintenance Lookup</span>
+  </footer>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+  <script>
+  (function(){
+    console.log('WNY Road Maintenance Lookup clean version loaded - 2026-05-09');
+    const map = L.map('map', { preferCanvas:true, zoomControl:true }).setView([43.06, -78.90], 11);
+    setTimeout(() => map.invalidateSize(), 100);
+    window.addEventListener('load', () => setTimeout(() => map.invalidateSize(), 250));
+    window.addEventListener('resize', () => map.invalidateSize());
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom:19, attribution:'© OpenStreetMap contributors' }).addTo(map);
+    const status = document.getElementById('status');
+    const colors = { 'NYSDOT':'#e31a1c', 'County':'#1f78b4', 'Town':'#33a02c', 'City or village':'#8e44ad', 'NYS Thruway':'#d4a800', 'Other':'#777' };
+    const labels = { '01':'NYSDOT', '02':'County', '03':'Town', '04':'City or village', '31':'NYS Thruway' };
+    const contacts = {
+      'NYSDOT': { name:'NYSDOT Region 5', phone:'(716) 847-3238', url:'https://www.dot.ny.gov/regional-offices/region5' },
+      'County': { name:'County highway / public works department', phone:'Verify with county or municipality', url:'https://www3.erie.gov/dpw/' },
+      'Town': { name:'Town highway department', phone:'Verify with town highway department', url:'' },
+      'City or village': { name:'City or village public works department', phone:'Verify with city/village DPW', url:'' },
+      'NYS Thruway': { name:'New York State Thruway Authority', phone:'1-800-842-2233', url:'https://www.thruway.ny.gov/' },
+      'Other': { name:'Responsible agency unknown', phone:'Verify with local municipality', url:'' }
+    };
+    const layerUrl = 'https://gis.dot.ny.gov/hostingny/rest/services/Geocortex/HDSV/MapServer/11/query';
+    // Smaller Phase 1 bounding box: Niagara Falls / NT / Wheatfield / Tonawanda / Amherst / Grand Island.
+    const bbox = { xmin:-79.12, ymin:42.94, xmax:-78.72, ymax:43.20 };
+    const roadLayer = L.geoJSON(null, {
+      style: f => {
+        const j = labels[(f.properties && f.properties.JURISDICTION) || ''] || 'Other';
+        return { color: colors[j] || colors.Other, weight: j==='NYSDOT' || j==='NYS Thruway' ? 4 : 3, opacity:.82 };
+      },
+      onEachFeature: (feature, layer) => {
+        const p = feature.properties || {};
+        const jurisdiction = labels[p.JURISDICTION] || p.JURISDICTION || 'Unknown';
+        const contact = contacts[jurisdiction] || contacts.Other;
+        const road = p.SEGMENT_NAME || p.ROUTE_NO || p.SIGNING || 'Road segment';
+        const municipality = p.MUNICIPALITY_DESC || 'Not listed';
+        const county = p.COUNTY_NAME_LONG || 'Not listed';
+        const owner = labels[p.OWNING_JURIS] || p.OWNED_BY_MUNI_NAME || p.OWNING_JURIS || 'Not listed';
+        const link = contact.url ? `<a href="${contact.url}" target="_blank" rel="noopener">Official contact page</a>` : 'Search official municipal website';
+        layer.bindPopup(`<div style="min-width:245px"><div class="popup-title">${escapeHtml(road)}</div><div class="popup-row"><span class="popup-label">Maintenance:</span> ${escapeHtml(jurisdiction)}</div><div class="popup-row"><span class="popup-label">Owner:</span> ${escapeHtml(owner)}</div><div class="popup-row"><span class="popup-label">Municipality:</span> ${escapeHtml(municipality)}</div><div class="popup-row"><span class="popup-label">County:</span> ${escapeHtml(county)}</div><div class="popup-row"><span class="popup-label">Contact:</span> ${escapeHtml(contact.name)}<br>${escapeHtml(contact.phone)}<br>${link}</div><div class="source-note">Source: NYSDOT Maintenance Jurisdiction layer. Verify before relying on this information.</div></div>`);
+      }
+    }).addTo(map);
+    function escapeHtml(value){ return String(value ?? '').replace(/[&<>'"]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[ch])); }
+    async function fetchPage(offset){
+      const params = new URLSearchParams({
+        f:'geojson', where:"1=1", outFields:'OBJECTID,JURISDICTION,OWNING_JURIS,COUNTY_NAME_LONG,MUNICIPALITY_DESC,OWNED_BY_MUNI_NAME,SEGMENT_NAME,ROUTE_NO,SIGNING',
+        returnGeometry:'true', outSR:'4326', inSR:'4326', spatialRel:'esriSpatialRelIntersects', geometryType:'esriGeometryEnvelope',
+        geometry: JSON.stringify(bbox), resultOffset:String(offset), resultRecordCount:'1000'
+      });
+      const res = await fetch(layerUrl + '?' + params.toString());
+      if(!res.ok) throw new Error('NYSDOT service returned HTTP ' + res.status);
+      return await res.json();
+    }
+    async function loadRoads(){
+      let offset = 0, total = 0, safety = 0;
+      try {
+        while(safety++ < 12){
+          const data = await fetchPage(offset);
+          if(data.error) throw new Error(data.error.message || 'ArcGIS query error');
+          const features = data.features || [];
+          if(!features.length) break;
+          roadLayer.addData(data);
+          total += features.length;
+          status.innerHTML = `<strong>Loaded ${total.toLocaleString()} road segments...</strong>Using official NYSDOT Maintenance Jurisdiction data.`;
+          if(features.length < 1000) break;
+          offset += 1000;
+        }
+        status.innerHTML = `<strong>Loaded ${total.toLocaleString()} road segments.</strong>Public beta: verify directly with the listed agency before relying on any segment.`;
+        setTimeout(()=>{ status.style.display='none'; }, 6500);
+      } catch(err){
+        console.error(err);
+        status.innerHTML = `<strong>Road data did not load.</strong>${escapeHtml(err.message)}<br><br>The base map is working, but the NYSDOT roadway service did not respond. Try refreshing, or check the browser console for details.`;
+      }
+    }
+    const legend = L.control({position:'topright'});
+    legend.onAdd = function(){
+      const div = L.DomUtil.create('div','legend');
+      div.innerHTML = '<h4>Maintenance Type</h4>' + Object.keys(colors).filter(k=>k!=='Other').map(k => `<div class="legend-item"><span class="line" style="background:${colors[k]}"></span>${k}</div>`).join('');
+      return div;
+    };
+    legend.addTo(map);
+    loadRoads();
+  })();
+  </script>
+</body>
+</html>
